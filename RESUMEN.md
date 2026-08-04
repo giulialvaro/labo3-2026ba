@@ -98,9 +98,20 @@ Al final arma un **WeightedEnsemble** que combina los mejores. Es global (usa to
 Da un número sin que entiendas *por qué*. Por eso la materia va después a **LightGBM con FE artesanal** (Clase 5),
 donde una controla todo.
 
-**Resultado:** (pendiente — corriendo el baseline RMSE)
+**Resultado:** AutoGluon RMSE = **0.255** en Kaggle (público). Corrido en Colab con GPU T4.
 
-## Tarea 03 — Mejorar AutoGluon ⬜ (pendiente)
+## Tarea 03 — Mejorar AutoGluon (métrica WAPE) ✅
+Cambié `eval_metric` de `RMSE` a `WAPE` (que ES la métrica de la competencia: `Σ|real-pred|/Σreal`).
+
+**Resultado contraintuitivo:** WAPE = **0.269**, PEOR que RMSE (0.255). Alinear la métrica de
+entrenamiento a la de evaluación NO garantizó mejor leaderboard. Por qué:
+1. AutoGluon valida en ventanas de fin-2019, pero el target es feb-2020 (+2 meses) → la mejora en
+   validación no transfirió al mes real.
+2. **Ruido de una sola corrida** — 0.249 / 0.255 / 0.269 están pegadísimos; hace falta repetir con
+   varias semillas para concluir (tal cual dice el libro).
+3. El público no es lo que califica (el privado sí).
+
+**Lección:** la bazooka de AutoGluon apenas le gana al naif tonto. *No existe el modelo maravilloso.*
 
 ## Clase 4 — Regresión Lineal / aplanado con lags ⬜ (pendiente)
 
@@ -109,8 +120,14 @@ donde una controla todo.
 ---
 
 ## Números en Kaggle (público) — ranking actual
-1. AutoGluon (grupo, jul) — **0.249**
-2. naif mismo mes — 0.271
-3. naif promedio 12m — 0.273
-4. AutoARIMA + log — 0.287
-5. naif último — 0.342
+1. AutoGluon RMSE (grupo, jul) — **0.249** ← mejor
+2. AutoGluon RMSE (hoy) — 0.255
+3. AutoGluon WAPE (hoy) — 0.269
+4. naif mismo mes — 0.271
+5. naif promedio 12m — 0.273
+6. AutoARIMA + log — 0.287
+7. naif último — 0.342
+
+**Observación clave:** todo apretado entre 0.25 y 0.29. AutoGluon apenas le gana al naif. La métrica
+WAPE (alineada a la competencia) no mejoró → hace falta repetir con semillas. El siguiente salto real
+se busca con LightGBM + Feature Engineering (Clase 5).

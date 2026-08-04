@@ -113,21 +113,36 @@ entrenamiento a la de evaluación NO garantizó mejor leaderboard. Por qué:
 
 **Lección:** la bazooka de AutoGluon apenas le gana al naif tonto. *No existe el modelo maravilloso.*
 
-## Clase 4 — Regresión Lineal / aplanado con lags ⬜ (pendiente)
+## Clase 4 — Regresión Lineal / aplanado con lags ✅
+Notebook: `src/Estadistica/z403_RegresionLineal_local.ipynb`
+
+**La idea (el giro clave):** aplanar la serie en una tabla `(features → target)`.
+- `clase = tn(t+2)` (shift -2) → lo que vende dentro de 2 meses
+- `tn_0 … tn_11` (shift 0..11) → los 12 meses hacia atrás, como features
+- Cada fila = "dados los últimos 12 meses, ¿cuánto vende a +2?". Eso ya es regresión clásica.
+
+**Qué hace z403:** arma la tabla con `.shift()`, entrena OLS en 201812 (~567 filas), predice feb-2020
+para 656 productos con historia completa; 124 sin historia → promedio (fallback).
+
+**Resultado en Kaggle: 0.231 → ¡EL MEJOR DE TODOS!** 🥇
+Una regresión lineal simple le ganó a AutoGluon (bazooka) y a ARIMA. **No es el modelo lo que importa,
+es la reformulación del dato** (serie → tabla con lags). Esta es la razón por la que la materia empuja
+al enfoque tabular + GBDT. Es la prueba de concepto del molde que escala a LightGBM (Clase 5).
 
 ## Clase 5 — LightGBM + Feature Engineering ⬜ (pendiente)
 
 ---
 
 ## Números en Kaggle (público) — ranking actual
-1. AutoGluon RMSE (grupo, jul) — **0.249** ← mejor
-2. AutoGluon RMSE (hoy) — 0.255
-3. AutoGluon WAPE (hoy) — 0.269
-4. naif mismo mes — 0.271
-5. naif promedio 12m — 0.273
-6. AutoARIMA + log — 0.287
-7. naif último — 0.342
+1. **Regresión Lineal (aplanado con lags) — 0.231** 🥇 ← MEJOR
+2. AutoGluon RMSE (grupo, jul) — 0.249
+3. AutoGluon RMSE (hoy) — 0.255
+4. AutoGluon WAPE (hoy) — 0.269
+5. naif mismo mes — 0.271
+6. naif promedio 12m — 0.273
+7. AutoARIMA + log — 0.287
+8. naif último — 0.342
 
-**Observación clave:** todo apretado entre 0.25 y 0.29. AutoGluon apenas le gana al naif. La métrica
-WAPE (alineada a la competencia) no mejoró → hace falta repetir con semillas. El siguiente salto real
-se busca con LightGBM + Feature Engineering (Clase 5).
+**Observación clave:** la regresión lineal simple (sobre la tabla aplanada) le gana a AutoGluon y ARIMA.
+No es el modelo, es la **reformulación del dato**. El siguiente salto se busca con LightGBM sobre el mismo
+molde + Feature Engineering (Clase 5): todos los períodos, todos los productos, más features, no-linealidades.

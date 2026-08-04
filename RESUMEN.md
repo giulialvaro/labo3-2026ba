@@ -77,7 +77,28 @@ mientras el naif "mismo mes" es **robusto**. *No existe el modelo maravilloso.*
 
 ---
 
-## Clase 3 — AutoGluon ⬜ (pendiente)
+## Clase 3 — AutoGluon 🟡 (corriendo en Colab)
+Notebook: `src/AutoGluon/z316_AutoGluon.ipynb` (del profe, corre en Colab con GPU T4).
+
+**Qué es AutoGluon:** AutoML de series de tiempo ("matar una mosca con bazooka"). Le tirás los datos
+y él **entrena y ensambla ~10 modelos** de las tres familias juntas:
+- estadística clásica: SeasonalNaive, AutoETS, Theta
+- GBDT / tabular: Recursive/DirectTabular
+- deep learning + foundation models: Chronos, TFT, DeepAR
+
+Al final arma un **WeightedEnsemble** que combina los mejores. Es global (usa todas las series juntas).
+
+**Qué hacemos en la clase:**
+1. Correr el notebook en Colab (T4 GPU): mount Drive → descargar datos → `install autogluon[all]` (pesado) → `fit` (~1h).
+2. Mirar el **leaderboard** de modelos que se va armando + cuál gana.
+3. Observar 3 cosas: `eval_metric='RMSE'` (que NO es la métrica del negocio ← se cambia en Tarea 3),
+   `num_val_windows=2` (walk-forward, evita leakage), y cambiar el nº de `experimento` en cada corrida.
+
+**Conclusión:** potentísimo pero **caja negra + lento (~1h) + métrica que no es la del negocio**.
+Da un número sin que entiendas *por qué*. Por eso la materia va después a **LightGBM con FE artesanal** (Clase 5),
+donde una controla todo.
+
+**Resultado:** (pendiente — corriendo el baseline RMSE)
 
 ## Tarea 03 — Mejorar AutoGluon ⬜ (pendiente)
 

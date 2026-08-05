@@ -13,7 +13,7 @@ import polars as pl, numpy as np, lightgbm as lgb, os
 PARAM = {
     'clave': ['product_id'],          # o ['customer_id', 'product_id'] (nivel cliente-producto)
     'target_lag': 2,                  # predecir t+2
-    'lags': list(range(1, 13)),       # tn de 1..12 meses atras
+    'lags': list(range(0, 13)),       # tn de 0(mes actual)..12 meses atras
     'log_target': True,
     'mes_val_ancla': 201910,          # ancla de validacion (target = 201912, conocido)
     'mes_pred_ancla': 201912,         # ancla de prediccion (target = 202002)

@@ -129,7 +129,42 @@ Una regresión lineal simple le ganó a AutoGluon (bazooka) y a ARIMA. **No es e
 es la reformulación del dato** (serie → tabla con lags). Esta es la razón por la que la materia empuja
 al enfoque tabular + GBDT. Es la prueba de concepto del molde que escala a LightGBM (Clase 5).
 
-## Clase 5 — LightGBM + Feature Engineering ⬜ (pendiente)
+## Clase 5 — LightGBM + Feature Engineering 🟡 (base lista, FE pendiente)
+Script: `src/lightgbm/lgbm_base.py` (workflow modular, corre local).
+
+### Las 2 granularidades (tema del profe)
+El profe ofrece armar el workflow a nivel **producto** o **cliente-producto**, con una `CLAVE` configurable
+(un solo workflow, no dos notebooks). Es solo un cambio de config: `'clave': ['product_id']` o `['customer_id','product_id']`.
+
+| Granularidad | Filas | Comentario |
+|---|---|---|
+| **Producto** (la nuestra) | ~22.349 | sumo clientes por producto. Liviana, entra en Colab/local |
+| Cliente-producto (compas) | ~13 millones | cada par cliente×producto como serie. Pesada → **necesita Google Cloud** + clustering/DTW |
+
+Es el MISMO dato agrupado distinto (las filas con venta real coinciden: 2.293.481). Elegimos **producto**
+por el timeline; cliente-producto queda como camino "pro" para mencionar.
+
+### El workflow base (6 pasos)
+1. **Config** (`PARAM`): clave, target=t+2, lags, log.
+2. **Cargar**: agrupo por clave×período, filtro 780, **relleno meses faltantes con 0** (para que los shift/lags queden alineados).
+3. **`agregar_features()`** (modular): hoy solo lags + target=`shift(-2)`. Acá va TODA la magia del FE.
+4. **Splits walk-forward** (sin leakage): train ≤201909, val=201910 (target 201912 conocido), pred=201912 (target 202002).
+5. **Entrenar**: target log1p + LightGBM `objective='regression_l1'` → WAPE local.
+6. **Feature importance** (brújula para iterar) + submission con fallback promedio.
+
+### Resultados base
+- WAPE local (201912): 0.2508 (lags 1-12) → **0.2417** (agregando lag_0 = mes actual).
+- Kaggle: LightGBM base (lags 1-12) = **0.269**. Todavía no supera la regresión (0.231) porque **falta el FE**.
+- Feature importance: lag_1, lag_0 (recencia) + lag_9/10/12 (estacionalidad) → confirma el EDA.
+
+### FALTA (jueves, día de estudio)
+1. **Feature Engineering** ← lo grande: rolling (3/6/12), deltas/ratios, estacionalidad, frecuencia de compra
+   (ceros/recencia), series "cosmos" (totales del universo y por cat1/2/3), `tb_productos` (categorías + tamaño).
+2. **sample_weight** por volumen (la métrica pondera por tn).
+3. **Tuning** con Optuna. Validación multi-mes.
+4. Loop iterativo: agrego feature → miro WAPE local + feature importance → creo más (ratios) → repito.
+
+**Caveat:** el WAPE local (201912) ≠ Kaggle (202002 público). Sirve para comparar RELATIVO al iterar, no como valor absoluto.
 
 ---
 
@@ -137,7 +172,7 @@ al enfoque tabular + GBDT. Es la prueba de concepto del molde que escala a Light
 1. **Regresión Lineal (aplanado con lags) — 0.231** 🥇 ← MEJOR
 2. AutoGluon RMSE (grupo, jul) — 0.249
 3. AutoGluon RMSE (hoy) — 0.255
-4. AutoGluon WAPE (hoy) — 0.269
+4. AutoGluon WAPE (hoy) / LightGBM base solo-lags — 0.269
 5. naif mismo mes — 0.271
 6. naif promedio 12m — 0.273
 7. AutoARIMA + log — 0.287

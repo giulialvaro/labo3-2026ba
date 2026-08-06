@@ -87,9 +87,10 @@ def cfg(**over):
 
 
 if __name__ == '__main__':
-    run_experimento('base_lags', cfg())
-    run_experimento('t1_rolling', cfg(rolling_windows=[3, 6, 12]))
-    run_experimento('t1_rolling_deltas', cfg(rolling_windows=[3, 6, 12], deltas=True))
-    run_experimento('t2_frecuencia', cfg(rolling_windows=[3, 6, 12], deltas=True, frecuencia=True, calendario=True))
+    mejor = dict(rolling_windows=[3, 6, 12], deltas=True)   # el mejor de Tier 1/2
+    run_experimento('t1_rolling_deltas', cfg(**mejor))
+    run_experimento('t3_cosmos_estac', cfg(**mejor, cosmos=True))
+    run_experimento('t3_attrs', cfg(**mejor, producto_attrs=True))
+    run_experimento('t3_cosmos_attrs', cfg(**mejor, cosmos=True, producto_attrs=True))
     print('\n=== resultados acumulados ===')
     print(pl.read_csv(LOG).select('experimento', 'n_features', 'wape_local'))

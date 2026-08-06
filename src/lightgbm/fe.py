@@ -80,6 +80,37 @@ def build_features(v, cfg):
         df = df.with_columns((pl.col('periodo') % 100).cast(pl.Int32).alias('mes'))
         feats.append('mes'); cat_feats.append('mes')
 
+    # --- F/G. COSMOS + ATRIBUTOS DE PRODUCTO (necesita tb_productos) ---
+    if cfg.get('cosmos') or cfg.get('producto_attrs'):
+        prod = (pl.read_csv(f'{DATA}/tb_productos.txt', separator='\t')
+                  .unique(subset='product_id')
+                  .select('product_id', 'cat1', 'cat2', 'cat3', 'brand', 'sku_size'))
+        df = df.join(prod, on='product_id', how='left')
+
+    if cfg.get('cosmos'):
+        uni = df.group_by('periodo').agg(pl.col('tn').sum().alias('_universo_tn'))
+        c3 = df.group_by('cat3', 'periodo').agg(pl.col('tn').sum().alias('_cat3_tn'))
+        df = df.join(uni, on='periodo', how='left').join(c3, on=['cat3', 'periodo'], how='left').sort(*k, 'ds')
+        # SOLO features estacionarias (shares y momentum YoY), NO niveles absolutos (que caen -> extrapolacion)
+        df = df.with_columns([
+            (pl.col('tn') / (pl.col('_universo_tn') + 1e-6)).alias('share_universo'),
+            (pl.col('tn') / (pl.col('_cat3_tn') + 1e-6)).alias('share_cat3'),
+            (pl.col('_universo_tn') / (pl.col('_universo_tn').shift(12).over(k) + 1e-6)).alias('universo_yoy'),
+            (pl.col('_cat3_tn') / (pl.col('_cat3_tn').shift(12).over(k) + 1e-6)).alias('cat3_yoy'),
+        ])
+        feats += ['share_universo', 'share_cat3', 'universo_yoy', 'cat3_yoy']
+
+    if cfg.get('producto_attrs'):
+        df = df.with_columns([
+            pl.col('cat1').cast(pl.Categorical).to_physical().alias('cat1'),
+            pl.col('cat2').cast(pl.Categorical).to_physical().alias('cat2'),
+            pl.col('cat3').cast(pl.Categorical).to_physical().alias('cat3_cat'),
+            pl.col('brand').cast(pl.Categorical).to_physical().alias('brand'),
+            pl.col('sku_size').cast(pl.Float64, strict=False).alias('sku_size'),
+        ])
+        feats += ['cat1', 'cat2', 'cat3_cat', 'brand', 'sku_size']
+        cat_feats += ['cat1', 'cat2', 'cat3_cat', 'brand']
+
     # target
     df = df.with_columns(pl.col('tn').shift(-cfg['target_lag']).over(k).alias('target'))
     return df, feats, cat_feats

@@ -218,6 +218,38 @@ le gana a mi LightGBM (0.265 púb) en el PRIVADO. El número público no me lo d
 **En una frase:** construir un modelo que genuinamente prediga bien feb-2020 (validación honesta + baja
 varianza), confiar en la validación local por encima del público, y elegir esa submission para el privado.
 
-### Próximo paso concreto
-Armar UNA validación que se parezca al target (febrero) y comparar TODOS los modelos con la MISMA vara
-(manzanas con manzanas) → elegir el mejor para el privado, más allá de lo que diga el público.
+### Comparación HONESTA (misma vara walk-forward: train ≤201907, val 201908-201910, mismas filas)
+
+| Modelo | WAPE (misma vara) |
+|---|---|
+| **naif promedio12** | **0.2497** 🥇 |
+| regresión (lags) | 0.2584 |
+| LightGBM base | 0.2629 |
+| LightGBM cosmos (FE) | 0.2656 |
+| naif mismo-mes | 0.2922 |
+| naif último | 0.3521 |
+
+**BOMBA:** con validación honesta, el **promedio simple de 12 meses le gana a TODO** (regresión, LightGBM con FE).
+Y contradice al público (donde ganaba la regresión) → **el ranking del público NO es confiable.**
+
+### Por qué LightGBM no le gana al promedio (iteración)
+Probamos regularizar, podar features y target-ratio → TODO empeoró. El LightGBM ya tiene el promedio
+como feature (`rmean_12`) y aún así lo empeora: **le agrega varianza al baseline robusto.** Cuando el mejor
+predictor es un estadístico simple y estable, un modelo flexible que intenta "mejorarlo" mete ruido (bias-variance).
+
+### La solución: BLEND (ensamble) — lo mejor para el privado ✅
+No "mejorar el LightGBM solo", sino **mezclarlo** con el baseline robusto:
+
+| | WAPE |
+|---|---|
+| solo naif-promedio | 0.2497 |
+| solo LightGBM | 0.2649 |
+| **BLEND 0.8·naif + 0.2·LightGBM** | **0.2480** ← ¡gana a ambos! |
+
+LightGBM solo es peor, pero está **decorrelacionado** → un poquito de su señal, mezclada con el promedio,
+mejora al promedio. Curva de barrido suave con mínimo en 0.7-0.8 → efecto real, no ruido.
+Submission: `exp/lgbm/blend_naif80_lgbm20.csv`. **Es la apuesta robusta para el privado.**
+
+### Pendiente / la posta real
+- **Nivel cliente-producto** (~13M filas, Google Cloud) → probablemente el salto real, para la competencia (cierra 16-ago).
+- Elegir en Kaggle la submission del BLEND como la que cuenta para el privado.

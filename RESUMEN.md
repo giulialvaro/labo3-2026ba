@@ -129,55 +129,95 @@ Una regresión lineal simple le ganó a AutoGluon (bazooka) y a ARIMA. **No es e
 es la reformulación del dato** (serie → tabla con lags). Esta es la razón por la que la materia empuja
 al enfoque tabular + GBDT. Es la prueba de concepto del molde que escala a LightGBM (Clase 5).
 
-## Clase 5 — LightGBM + Feature Engineering 🟡 (base lista, FE pendiente)
-Script: `src/lightgbm/lgbm_base.py` (workflow modular, corre local).
+## Clase 5 — LightGBM + Feature Engineering ✅ (base + FE hechos)
 
-### Las 2 granularidades (tema del profe)
-El profe ofrece armar el workflow a nivel **producto** o **cliente-producto**, con una `CLAVE` configurable
-(un solo workflow, no dos notebooks). Es solo un cambio de config: `'clave': ['product_id']` o `['customer_id','product_id']`.
+### El workflow que armamos (3 archivos)
+- `src/lightgbm/fe.py` → **`build_features(df, cfg)`**: funciones de features modulares. Prendés/apagás
+  grupos con un config. Barato agregar features (una línea).
+- `src/lightgbm/experimento.py` → **runner**: carga, entrena, mide WAPE, y **loguea** cada corrida.
+- `exp/lgbm/resultados.csv` → tabla que **acumula todas las corridas** (base vs FE1 vs FE2...) para comparar.
+- `exp/lgbm/imp_<exp>.csv` → feature importance de cada corrida.
 
-| Granularidad | Filas | Comentario |
+Tracking: **CSV simple, no MLflow** (overkill para el timeline). Es lo que pidió el profe ("crear logs").
+
+### Las 2 granularidades
+Nivel **producto** (~22k filas, la nuestra, entra local) o **cliente-producto** (~13 millones, necesita
+Google Cloud + clustering DTW). La `clave` es configurable, un solo workflow. Elegimos producto por el timeline.
+
+### Qué features probamos y qué pasó
+Loop: agrego tanda → mido WAPE local → conservo lo que ayuda, tiro lo que resta.
+
+| Features | WAPE local | Veredicto |
 |---|---|---|
-| **Producto** (la nuestra) | ~22.349 | sumo clientes por producto. Liviana, entra en Colab/local |
-| Cliente-producto (compas) | ~13 millones | cada par cliente×producto como serie. Pesada → **necesita Google Cloud** + clustering/DTW |
+| solo lags (0-12) | ~0.253 | base |
+| + rolling (3/6/12) | ~0.254 | no ayuda solo |
+| + deltas/ratios | ~0.251 | ✅ ayuda un poco |
+| + frecuencia/calendario | 0.265+ | 🔴 resta |
+| **+ cosmos estacionario** | **~0.248** | ✅ el mejor |
 
-Es el MISMO dato agrupado distinto (las filas con venta real coinciden: 2.293.481). Elegimos **producto**
-por el timeline; cliente-producto queda como camino "pro" para mencionar.
+### Las 3 LECCIONES GRANDES (lo más importante para exponer) 🎯
+1. **Los árboles NO extrapolan** → nunca uses features de nivel absoluto que crecen/caen con el tiempo
+   (ej. `antiguedad`, `universo_tn`, `cat3_tn` que caen con el mercado −22%). Rompen la predicción.
+   **Usá siempre ratios / shares / momentum (estacionario).** El workflow lo cazó DOS veces.
+2. **Reproducibilidad y ruido:** el mismo modelo da resultados distintos entre corridas (~0.005 de spread)
+   por el orden de filas + bagging + threading. **La forma correcta es promediar VARIAS SEMILLAS** y solo
+   creer diferencias más grandes que el ruido. Muchas "mejoras" chicas eran ruido.
+3. **Más features ≠ mejor.** El FE es SELECTIVO: rolling+deltas+cosmos ayudan; frecuencia resta.
 
-### El workflow base (6 pasos)
-1. **Config** (`PARAM`): clave, target=t+2, lags, log.
-2. **Cargar**: agrupo por clave×período, filtro 780, **relleno meses faltantes con 0** (para que los shift/lags queden alineados).
-3. **`agregar_features()`** (modular): hoy solo lags + target=`shift(-2)`. Acá va TODA la magia del FE.
-4. **Splits walk-forward** (sin leakage): train ≤201909, val=201910 (target 201912 conocido), pred=201912 (target 202002).
-5. **Entrenar**: target log1p + LightGBM `objective='regression_l1'` → WAPE local.
-6. **Feature importance** (brújula para iterar) + submission con fallback promedio.
+### Dónde quedamos
+- Mejor LightGBM (cosmos, 5 semillas promediadas): **0.265 en Kaggle público**.
+- **Todavía no le gana a la regresión (0.231) en el PÚBLICO** — pero ver la sección de Estrategia abajo:
+  el público no es lo que cuenta.
+- Validando sobre un **febrero real** (misma estación que el target), el LightGBM da **0.207** → el modelo
+  está bien; febrero-2020 es genuinamente difícil (mercado en caída + elecciones).
 
-### Resultados base
-- WAPE local (201912): 0.2508 (lags 1-12) → **0.2417** (agregando lag_0 = mes actual).
-- Kaggle: LightGBM base (lags 1-12) = **0.269**. Todavía no supera la regresión (0.231) porque **falta el FE**.
-- Feature importance: lag_1, lag_0 (recencia) + lag_9/10/12 (estacionalidad) → confirma el EDA.
-
-### FALTA (jueves, día de estudio)
-1. **Feature Engineering** ← lo grande: rolling (3/6/12), deltas/ratios, estacionalidad, frecuencia de compra
-   (ceros/recencia), series "cosmos" (totales del universo y por cat1/2/3), `tb_productos` (categorías + tamaño).
-2. **sample_weight** por volumen (la métrica pondera por tn).
-3. **Tuning** con Optuna. Validación multi-mes.
-4. Loop iterativo: agrego feature → miro WAPE local + feature importance → creo más (ratios) → repito.
-
-**Caveat:** el WAPE local (201912) ≠ Kaggle (202002 público). Sirve para comparar RELATIVO al iterar, no como valor absoluto.
+### Falta / próximos pasos
+- **Comparar manzanas con manzanas**: misma validación (que se parezca a febrero) para TODOS los modelos.
+- **Ensamble** regresión + LightGBM + **sample_weight** por volumen (bajar varianza = mejor privado).
 
 ---
 
-## Números en Kaggle (público) — ranking actual
-1. **Regresión Lineal (aplanado con lags) — 0.231** 🥇 ← MEJOR
+## Números en Kaggle (PÚBLICO) — ranking actual
+1. **Regresión Lineal (aplanado con lags) — 0.231** 🥇
 2. AutoGluon RMSE (grupo, jul) — 0.249
 3. AutoGluon RMSE (hoy) — 0.255
-4. AutoGluon WAPE (hoy) / LightGBM base solo-lags — 0.269
-5. naif mismo mes — 0.271
-6. naif promedio 12m — 0.273
-7. AutoARIMA + log — 0.287
-8. naif último — 0.342
+4. LightGBM cosmos (5 semillas) — 0.265
+5. AutoGluon WAPE / LightGBM base solo-lags — 0.269
+6. naif mismo mes — 0.271
+7. naif promedio 12m — 0.273
+8. AutoARIMA + log — 0.287
+9. naif último — 0.342
 
-**Observación clave:** la regresión lineal simple (sobre la tabla aplanada) le gana a AutoGluon y ARIMA.
-No es el modelo, es la **reformulación del dato**. El siguiente salto se busca con LightGBM sobre el mismo
-molde + Feature Engineering (Clase 5): todos los períodos, todos los productos, más features, no-linealidades.
+**Observación:** todo apretado entre 0.23 y 0.29. Ni la bazooka ni el FE le sacan ventaja clara a una
+regresión simple → *no existe el modelo maravilloso* (tesis del libro).
+
+---
+
+## ⭐ ESTRATEGIA: Público vs Privado (lo más importante)
+
+**El objetivo NO es ganar el Public Leaderboard.** El libro es tajante: el público vale **0% de la nota**,
+solo cuenta el **Private Leaderboard** (otro subset de datos, oculto hasta el final).
+
+| | Public LB | Private LB |
+|---|---|---|
+| Qué es | score sobre un subset visible | score sobre OTRO subset, oculto |
+| Cuánto vale | **0%** | **TODO (tu nota)** |
+
+**La trampa:** si elijo mi modelo mirando el público (ej. "la regresión da 0.231, me quedo con esa"),
+estoy sobreajustando al subset público → puede dar PEOR en el privado. No sé si la regresión (0.231 púb)
+le gana a mi LightGBM (0.265 púb) en el PRIVADO. El número público no me lo dice.
+
+**Cómo hacer que el privado dé bien:**
+1. **Validación local honesta que se parezca al target** (validar sobre febreros, no meses cualquiera).
+   Si mi CV local lo aprueba y no está tuneado al público → transfiere al privado.
+2. **Bajar la varianza:** promediar semillas + ensamblar. Más estable = mejor privado.
+3. **No sobreajustar:** modelos simples/robustos suelen ganar el privado.
+4. **Elegir la submission final por la validación local, NO por el score público** (Kaggle deja elegir
+   cuál cuenta para el privado — hay que usar esa elección).
+
+**En una frase:** construir un modelo que genuinamente prediga bien feb-2020 (validación honesta + baja
+varianza), confiar en la validación local por encima del público, y elegir esa submission para el privado.
+
+### Próximo paso concreto
+Armar UNA validación que se parezca al target (febrero) y comparar TODOS los modelos con la MISMA vara
+(manzanas con manzanas) → elegir el mejor para el privado, más allá de lo que diga el público.

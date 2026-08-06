@@ -21,6 +21,7 @@ def wape(y_true, y_pred):
 def run_experimento(nombre, cfg, submit=False):
     v = fe.cargar(cfg['clave'])
     tb, feats, cat_feats = fe.build_features(v, cfg)
+    tb = tb.sort(*cfg['clave'], 'periodo')   # ORDEN FIJO -> reproducibilidad (el bagging samplea por posicion)
 
     # validacion multi-mes (robusta): entreno <=201906, valido en 4 meses ancla pooled
     VAL_MESES = [201907, 201908, 201909, 201910]   # targets 201909..201912 (conocidos)
@@ -31,7 +32,8 @@ def run_experimento(nombre, cfg, submit=False):
     ytr = np.log1p(train['target'].to_numpy()) if cfg['log_target'] else train['target'].to_numpy()
     model = lgb.LGBMRegressor(objective='regression_l1', n_estimators=400, learning_rate=0.05,
                               num_leaves=31, feature_fraction=0.8, bagging_fraction=0.8,
-                              min_child_samples=20, verbose=-1, random_state=102191)
+                              min_child_samples=20, verbose=-1, random_state=102191,
+                              deterministic=True, force_row_wise=True, num_threads=1)
     cats = [c for c in cat_feats if c in feats]
     model.fit(train.select(feats).to_pandas(), ytr,
               categorical_feature=cats if cats else 'auto')

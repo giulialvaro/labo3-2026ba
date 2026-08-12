@@ -253,3 +253,39 @@ Submission: `exp/lgbm/blend_naif80_lgbm20.csv`. **Es la apuesta robusta para el 
 ### Pendiente / la posta real
 - **Nivel cliente-producto** (~13M filas, Google Cloud) → probablemente el salto real, para la competencia (cierra 16-ago).
 - Elegir en Kaggle la submission del BLEND como la que cuenta para el privado.
+
+---
+
+## 🏁 ROADMAP COMPETENCIA (cliente-producto — post entrega de clase)
+Ya tenemos todos los modelos EXCEPTO el LightGBM a nivel cliente-producto. Infra lista: GCloud + PC (64GB).
+Dataset base: `datasets/sell-in-zeroes.txt.gz` (17M filas, generado con `z601`, ceros en meses sin venta).
+
+### 1. FE cliente-producto SUPER completo + ESCALADO
+**Escalado del target (técnica alumna Rosario — lo más importante):**
+```
+tn_escalado = tn / promedio(mes actual + anteriores)   # por serie, sin leakage
+clase = tn(t+2) escalado
+```
+→ el modelo aprende patrones RELATIVOS, no niveles absolutos (los árboles no extrapolan niveles).
+
+**FE completo (hacer de más, cortar por importancia después):**
+- Historia: lags, delta lags, medias móviles, tendencia, max/min
+- Cosmos/categorías: suma todos los productos, cat1/2/3/marca, **suma mismo producto todos los clientes**,
+  **suma mismo cliente todos los productos** (nuevas, potentes en cliente-producto)
+
+**Hiperparámetros LightGBM:**
+- `objective='tweedie'` (mayoría de datos son 0 en cliente-producto)
+- `max_bin=1230` (acá alto funciona mejor, al revés que lo usual)
+
+### 2. DTW Clustering (7 clusters)
+- Clustering jerárquico con distancia **DTW** sobre las series (input **escalado**) → columna `cluster` (1-7)
+- Doble propósito: (a) el dataset no entra en RAM → K clusters = K modelos más ajustados;
+  (b) resuelve series mixtas (un cliente vende mayo Y sopa)
+- DTW es LENTO → **samplear**. Único hiperparámetro: la **ventana de tiempo** (probar).
+- Alternativa rápida si apura: clusters por **cuartiles de toneladas**.
+
+### 3. Correr todo + ENSAMBLE
+- Correr los mejores (AutoGluon, regresión, LightGBM por cluster) → **ensamblar**.
+- *"Siempre lo que mejor funciona es un ensemble"* (ya visto: blend 0.2480).
+
+**Orden:** FE+escalado → LightGBM (tweedie/max_bin) validación honesta → DTW clustering → correr todo + ensamble.

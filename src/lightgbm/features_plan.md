@@ -1,66 +1,64 @@
-# Plan de Feature Engineering — LightGBM (Clase 5)
+# Plan de Feature Engineering — LightGBM cliente-producto (competencia)
 
-Catálogo de features para `agregar_features()` en `lgbm_base.py`.
-Patrón: cada feature es una línea → `pl.col('tn').<func>().over(clave).alias('nombre')`.
-Loop: agrego tanda → mido WAPE local (201912) + feature importance → itero.
-
-> Juez local base (solo lags): **WAPE = 0.2417**. Objetivo: bajarlo y pasar el 0.231 de la regresión.
+Nivel: **cliente-producto** (dataset `sell-in-zeroes`, 17M filas, con ceros).
+LightGBM: `objective='tweedie'`, `max_bin=1230` (SIN log — Tweedie maneja ceros/asimetría).
+Regla: **features de más, cortar por importancia después**. Todo nivel absoluto → ratio/momentum (estacionario).
 
 ---
 
-## A. Lags *(serie pura — base)*
-- [x] `lag_0 … lag_12`
-- [ ] extender: `lag_18`, `lag_24` (si hay historia)
+## A. 🔑 ESCALADO (la base — técnica Rosario)
+- [ ] `promedio_nivel` = `rolling_mean(tn)` del mes actual + anteriores, por serie (guardar como columna)
+- [ ] `tn_escalado = tn / promedio_nivel`
+- [ ] **target = `tn(t+2)` escalado** → al predecir, des-escalar (× `promedio_nivel`)
+- ⚠️ el promedio usa SOLO actual+pasado (sin leakage)
 
-## B. Rolling stats *(ventanas 3/6/12, con `.shift(1)` anti-leakage)*
-- [ ] `rmean_3/6/12` — media móvil (tendencia suavizada)
-- [ ] `rstd_3/6/12` — volatilidad
-- [ ] `rmax_6/12`, `rmin_6/12` — techos/pisos
-- [ ] `rmedian_6/12` — robusto a outliers
+## B. Historia (sobre la serie escalada)
+- [ ] Lags 0-12, **18, 24**
+- [ ] Rolling mean/std/min/max: **3/6/9/12/24**
+- [ ] Deltas/ratios: `tn−lag1`, `tn−lag12`, `tn/lag1`, `tn/lag12`
+- [ ] **Delta de lags** (lag_i − lag_j)
+- [ ] **Tendencia** (slope últimos N)
+- [ ] **Rolling median** (6/12) + **EWMA** (varios spans)
 
-## C. Deltas / momentum / ratios *(serie pura)*
-- [ ] `delta_1 = tn − lag_1`, `delta_12 = tn − lag_12` (YoY)
-- [ ] `ratio_1 = tn / lag_1`, `ratio_12 = tn / lag_12`
-- [ ] `tn / rmean_12` — anomalía (qué tan raro es el mes)
-- [ ] `rmean_3 / rmean_12` — momentum corto vs largo
-- [ ] `slope_6` — pendiente de los últimos 6 meses
+## C. Frecuencia (básica — el resto NO)
+- [ ] meses desde última venta
+- [ ] ceros_12
+- (racha ceros / ADI / CV² → descartados)
 
-## D. Frecuencia / intermitencia / ciclo de vida *(serie pura)*
-- [ ] `meses_desde_ultima_venta` (recencia)
-- [ ] `ceros_12` — cantidad de ceros en 12 meses
-- [ ] `racha_ceros` — meses consecutivos sin vender
-- [ ] `ADI` — promedio de meses entre compras
-- [ ] `antiguedad` — meses desde la primera venta
-- [ ] `es_nuevo` — flag (< N meses de historia)
+## D. 🌌 Cosmos / agregaciones (lo más potente acá)
+Totales por mes (+ momentum YoY estacionario, NO el nivel):
+- [ ] suma universo (todos los productos)
+- [ ] suma cat1 / cat2 / cat3 / marca
+- [ ] **suma mismo PRODUCTO, todos los clientes** (demanda total del producto)
+- [ ] **suma mismo CLIENTE, todos los productos** (cuánto compra el cliente en total)
 
-## E. Estacionalidad / calendario *(serie pura)*
-- [ ] `mes` (1-12) — como **categórica**
-- [ ] `trimestre`
+Shares (mi participación):
+- [ ] `mi_tn / total_producto`
+- [ ] `mi_tn / total_cliente`
+- [ ] `mi_tn / total_cat3`
 
-## F. Cosmos 🌌 *(necesita `tb_productos`)*
-- [ ] `universo_tn` — total de TODOS los productos por mes + lags/rolling (captura el −22%)
-- [ ] `cat1_tn`, `cat2_tn`, `cat3_tn` — totales por categoría + lags
-- [ ] `share_cat3 = tn / cat3_tn` — importancia relativa en la categoría
-- [ ] `share_universo = tn / universo_tn`
+## E. Categóricas
+- [ ] cat1, cat2, cat3, marca, sku_size
+- [ ] **cluster** (del DTW — se agrega después)
+- [ ] **target encoding** de customer_id / product_id (media del target por cliente/producto)
+  - ⚠️ calcular out-of-fold / solo en train para no filtrar
 
-## G. Atributos del producto *(necesita `tb_productos`)*
-- [ ] `cat1` (homecare), `cat2` (personal care), `cat3` (food) — **categóricas**
-- [ ] `brand` — categórica
-- [ ] `sku_size` — tamaño/capacidad (numérica)
-- [ ] avanzado: suma del mismo producto en todas las presentaciones, tamaño anterior/posterior
+## F. Precio / demanda (están en el sell-in)
+- [ ] `plan_precios_cuidados` + historia (meses en plan)
+- [ ] **fill rate** = `tn / cust_request_tn` (+ lags) → proxy quiebre de stock / demanda insatisfecha
 
-## H. Peso
-- [ ] `sample_weight` = volumen reciente (alinea a la métrica ponderada por tn)
+## G. Calendario
+- [ ] `mes` (categórico) + `trimestre`
 
-## I. Opcional / trabajo futuro
-- [ ] `plan_precios_cuidados`, fill-rate (`cust_request` vs `tn`) — fuera del scope actual
-- [ ] **Clusters DTW** (`tslearn` → `TimeSeriesKMeans(metric="dtw")`) — cluster como categórica, o para nivel cliente-producto
+## H. Relaciones (extra)
+- [ ] **Amplitud del producto**: nº de clientes distintos que lo compran + tendencia
+- [ ] **Diversidad del cliente**: nº de productos distintos que compra
+- [ ] **Par vs total**: crece/cae este par vs el total del cliente / del producto
 
 ---
 
 ## Orden de implementación
-1. **B + C** (rolling + deltas + ratios) — barato, alto impacto
-2. **D** (frecuencia / ceros)
-3. **F + G** (join `tb_productos` + cosmos) — se espera el salto grande
-4. **H** (sample_weight)
-5. Optuna + (opcional) DTW
+1. A (escalado) + B (historia) → primer LightGBM tweedie, validación honesta
+2. D (cosmos/agregaciones) + F (precio/demanda) → medir
+3. E (target encoding) + H (relaciones) → medir
+4. Podar por importancia · DTW clustering (columna cluster) · ensamble

@@ -129,6 +129,12 @@ def build_features(df, cfg=None):
         df = df.with_columns([pl.col('fill_rate').shift(L).over(k).alias(f'fill_rate_lag{L}') for L in [1, 2, 3]])
         feats += ['ppc', 'fill_rate', 'fill_rate_lag1', 'fill_rate_lag2', 'fill_rate_lag3']
 
+    # ---------- cluster DTW (si existe el archivo product_clusters.csv) ----------
+    cl_path = f'{DATA}/product_clusters.csv'
+    if os.path.exists(cl_path):
+        df = df.join(pl.read_csv(cl_path), on='product_id', how='left')
+        feats.append('cluster')
+
     return df, feats
 
 

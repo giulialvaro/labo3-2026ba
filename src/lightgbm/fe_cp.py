@@ -24,9 +24,12 @@ CLAVE = ['customer_id', 'product_id']
 DEF_CFG = {
     'escala_win': 12,          # ventana del promedio de escalado (mes actual + anteriores)
     'esc_floor': 1e-3,         # piso para no dividir por ~0
+    'eps': 1e-6,
     'lags': list(range(0, 13)) + [18, 24],
     'rolling_windows': [3, 6, 9, 12, 24],
     'target_lag': 2,
+    'cosmos': True,            # D: agregaciones producto/cliente/cat + shares + momentum
+    'precio': True,            # F: precios cuidados + fill rate
 }
 
 
@@ -88,6 +91,43 @@ def build_features(df, cfg=None):
         pl.col('tn_esc').ewm_mean(span=6).over(k).alias('ewm_6'),
     ])
     feats += ['delta_1', 'delta_12', 'dlag_1_2', 'dlag_1_3', 'slope_5', 'ewm_3', 'ewm_6']
+
+    eps = cfg['eps']
+    # ---------- D. COSMOS / AGREGACIONES (producto, cliente, categoria) ----------
+    if cfg.get('cosmos'):
+        prod = (pl.read_csv(f'{DATA}/tb_productos.txt', separator='\t')
+                  .unique(subset='product_id').select('product_id', 'cat1', 'cat2', 'cat3', 'brand', 'sku_size'))
+        df = df.join(prod, on='product_id', how='left')
+        # totales por periodo (mismo mes = sin leakage)
+        tot_prod = df.group_by('product_id', 'periodo').agg(pl.col('tn').sum().alias('tot_prod')).sort('product_id', 'periodo')
+        tot_cli = df.group_by('customer_id', 'periodo').agg(pl.col('tn').sum().alias('tot_cli')).sort('customer_id', 'periodo')
+        tot_cat3 = df.group_by('cat3', 'periodo').agg(pl.col('tn').sum().alias('tot_cat3'))
+        tot_uni = df.group_by('periodo').agg(pl.col('tn').sum().alias('tot_uni')).sort('periodo')
+        # momentum YoY (ESTACIONARIO, no el nivel absoluto que cae)
+        tot_prod = tot_prod.with_columns((pl.col('tot_prod') / (pl.col('tot_prod').shift(12).over('product_id') + eps)).alias('yoy_prod'))
+        tot_cli = tot_cli.with_columns((pl.col('tot_cli') / (pl.col('tot_cli').shift(12).over('customer_id') + eps)).alias('yoy_cli'))
+        tot_uni = tot_uni.with_columns((pl.col('tot_uni') / (pl.col('tot_uni').shift(12) + eps)).alias('yoy_uni'))
+        df = (df.join(tot_prod, on=['product_id', 'periodo'], how='left')
+                .join(tot_cli, on=['customer_id', 'periodo'], how='left')
+                .join(tot_cat3, on=['cat3', 'periodo'], how='left')
+                .join(tot_uni, on='periodo', how='left'))
+        # shares (mi participacion, estacionario) — NO uso los niveles absolutos
+        df = df.with_columns([
+            (pl.col('tn') / (pl.col('tot_prod') + eps)).alias('share_prod'),
+            (pl.col('tn') / (pl.col('tot_cli') + eps)).alias('share_cli'),
+            (pl.col('tn') / (pl.col('tot_cat3') + eps)).alias('share_cat3'),
+        ])
+        feats += ['share_prod', 'share_cli', 'share_cat3', 'yoy_prod', 'yoy_cli', 'yoy_uni']
+
+    # ---------- F. PRECIO / DEMANDA ----------
+    if cfg.get('precio'):
+        df = df.sort(*k, 'periodo')   # re-ordeno antes de los shifts (los joins de D reordenan)
+        df = df.with_columns([
+            pl.col('plan_precios_cuidados').cast(pl.Int8).alias('ppc'),
+            (pl.col('tn') / (pl.col('cust_request_tn') + eps)).alias('fill_rate'),
+        ])
+        df = df.with_columns([pl.col('fill_rate').shift(L).over(k).alias(f'fill_rate_lag{L}') for L in [1, 2, 3]])
+        feats += ['ppc', 'fill_rate', 'fill_rate_lag1', 'fill_rate_lag2', 'fill_rate_lag3']
 
     return df, feats
 

@@ -83,7 +83,7 @@ def main():
         pl.Series('pred_esc', np.clip(model.predict(pred.select(feats).to_pandas()), 0, None))
     ).with_columns((pl.col('pred_esc') * pl.col('promedio_nivel')).alias('pred_tn'))
     sub = pr.group_by('product_id').agg(pl.col('pred_tn').sum().alias('tn'))
-    apre = pl.read_csv('datasets/product_id_apredecir201912.txt', separator='\t')
+    apre = pl.read_csv(f'{fe_cp.DATA}/product_id_apredecir201912.txt', separator='\t')
     prom12 = prod_real.filter(pl.col('periodo').is_between(201901, 201912)).group_by('product_id').agg(pl.col('tn_prod').mean().alias('tn_fb'))
     out = (apre.join(sub, on='product_id', how='left').join(prom12, on='product_id', how='left')
               .with_columns(pl.coalesce('tn', 'tn_fb').fill_null(0.0).alias('tn')).select('product_id', 'tn'))

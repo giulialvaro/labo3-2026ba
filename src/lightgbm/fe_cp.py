@@ -7,8 +7,18 @@ Bloques implementados: A (escalado) + B (historia). Se agregan D/E/F/G/H despues
 Modo sample: cargar(sample_productos=N) para desarrollar rapido en el Mac.
 """
 import polars as pl
+import os
 
-DATA = 'datasets'
+
+def _find_data():
+    # local: datasets/  |  GCP: ~/buckets/b1/datasets  |  o via env DATA_DIR
+    for d in [os.environ.get('DATA_DIR'), 'datasets', os.path.expanduser('~/buckets/b1/datasets')]:
+        if d and os.path.isdir(d):
+            return d
+    return 'datasets'
+
+
+DATA = _find_data()
 CLAVE = ['customer_id', 'product_id']
 
 DEF_CFG = {

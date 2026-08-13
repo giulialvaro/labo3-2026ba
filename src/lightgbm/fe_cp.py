@@ -132,7 +132,8 @@ def build_features(df, cfg=None):
     # ---------- cluster DTW (si existe el archivo product_clusters.csv) ----------
     cl_path = f'{DATA}/product_clusters.csv'
     if os.path.exists(cl_path):
-        df = df.join(pl.read_csv(cl_path), on='product_id', how='left')
+        cl = pl.read_csv(cl_path).with_columns(pl.col('product_id').cast(pl.Int64))
+        df = df.join(cl, on='product_id', how='left')
         feats.append('cluster')
 
     return df, feats

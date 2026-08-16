@@ -73,6 +73,12 @@ def main():
     w = collapse_wape(val_pred.select('customer_id', 'product_id', 'periodo', 'pred_tn'), prod_real)
     print(f'\n>>> WAPE a nivel PRODUCTO (walk-forward) = {w:.4f}   (ref producto: naif~0.25, blend~0.248)')
 
+    # guardo predicciones de validacion a nivel producto (para el ENSAMBLE)
+    vp = con_target_periodo(val_pred.select('customer_id', 'product_id', 'periodo', 'pred_tn'))
+    vpp = (vp.group_by('product_id', 'tperiodo').agg(pl.col('pred_tn').sum().alias('pred_cp'))
+             .join(prod_real, left_on=['product_id', 'tperiodo'], right_on=['product_id', 'periodo'], how='inner'))
+    vpp.write_csv('exp/lgbm_cp/val_pred.csv')
+
     # feature importance
     imp = pl.DataFrame({'feature': feats, 'importance': model.feature_importances_}).sort('importance', descending=True)
     imp.write_csv('exp/lgbm_cp/imp_cp.csv')

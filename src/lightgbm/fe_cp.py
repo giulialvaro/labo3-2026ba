@@ -130,9 +130,14 @@ def build_features(df, cfg=None):
         feats += ['ppc', 'fill_rate', 'fill_rate_lag1', 'fill_rate_lag2', 'fill_rate_lag3']
 
     # ---------- cluster DTW (si existe el archivo product_clusters.csv) ----------
-    cl_path = f'{DATA}/product_clusters.csv'
-    if os.path.exists(cl_path):
-        cl = pl.read_csv(cl_path).with_columns(pl.col('product_id').cast(pl.Int64))
+    cp_path = f'{DATA}/cp_clusters.csv'          # cluster a nivel CLIENTE-PRODUCTO (preferido)
+    prod_path = f'{DATA}/product_clusters.csv'   # fallback: cluster a nivel producto
+    if os.path.exists(cp_path):
+        cl = pl.read_csv(cp_path).with_columns([pl.col('customer_id').cast(pl.Int64), pl.col('product_id').cast(pl.Int64)])
+        df = df.join(cl, on=['customer_id', 'product_id'], how='left')
+        feats.append('cluster')
+    elif os.path.exists(prod_path):
+        cl = pl.read_csv(prod_path).with_columns(pl.col('product_id').cast(pl.Int64))
         df = df.join(cl, on='product_id', how='left')
         feats.append('cluster')
 

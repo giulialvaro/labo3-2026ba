@@ -289,3 +289,55 @@ clase = tn(t+2) escalado
 - *"Siempre lo que mejor funciona es un ensemble"* (ya visto: blend 0.2480).
 
 **Orden:** FE+escalado → LightGBM (tweedie/max_bin) validación honesta → DTW clustering → correr todo + ensamble.
+
+---
+
+## Workflow final LightGBM (16-ago)
+
+Se rearmó el pipeline completo para comparar sin mezclar granularidades ni ventanas:
+
+- `producto_limpio.py`: control a nivel producto, validación principal febrero-2019 y control diciembre-2019.
+- `fe_cp_a_producto.py`: transforma los 17M registros en estructura comercial por producto
+  (compradores, altas, repetición, concentración, fill rate y regímenes).
+- `dtw_clusters_cp_v2.py`: separa sparse antes de DTW, usa DTW real para asignar y preserva `null`
+  fuera de la vida observada.
+- `cliente_producto_hurdle.py`: clasificador de compra × regresor Tweedie de cantidad; mide WAPE
+  solamente después de sumar clientes a producto.
+- `ensamble_final.py`: mezcla contra el `src/Estadistica/linreg.csv` exacto de 0.231.
+
+### DTW v2
+
+Los 722.457 pares quedaron segmentados así:
+
+- 348.018 nunca compraron.
+- 117.437 compraron 1-2 meses.
+- 83.212 compraron 3-5 meses.
+- 173.790 series con 6+ compras pasan a cuatro clusters DTW.
+
+Para no filtrar futuro, los medoides se versionan por corte: en validación se aprenden en el año de
+entrenamiento y se reutilizan al asignar el año siguiente. Para el final se aprenden hasta 201812 y se
+aplican a 201912.
+
+### Control producto, misma vara
+
+| Modelo | Febrero local | Diciembre control | Score 70/30 |
+|---|---:|---:|---:|
+| **LightGBM lags raw** | **0.1914** | **0.2558** | **0.2107** |
+| FE limpio raw | 0.1952 | 0.2859 | 0.2224 |
+| FE limpio log | 0.1986 | 0.2821 | 0.2237 |
+| FE limpio + stocks | 0.1969 | 0.2899 | 0.2248 |
+| Cliente-producto agregado | 0.2178 | 0.3884 | 0.2690 |
+
+Conclusión provisional: en producto, agregar todas las features aumenta varianza; el control robusto sigue
+siendo `lags_raw`. La ruta cliente-producto de dos etapas queda como challenger a ejecutar completa en GCP,
+no como reemplazo automático.
+
+### Ensamble realmente correcto
+
+Los blends viejos no usaban la regresión exacta. Ahora se generaron contra el archivo real de 0.231:
+
+- 90% regresión exacta + 10% LightGBM limpio.
+- 80% regresión exacta + 20% LightGBM limpio.
+- 70% regresión exacta + 30% LightGBM limpio.
+
+Están en `exp/ensamble_final/`. No se suben automáticamente: primero se revisa el challenger completo.

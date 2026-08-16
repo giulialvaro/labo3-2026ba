@@ -1,0 +1,20 @@
+{
+  "source": "/Users/giulialvaro/Library/CloudStorage/OneDrive-Personal/estudios/Austral/Materias/018-Laboratorio de Implementación III/labo3-2026ba/datasets/sell-in-zeroes.txt.gz",
+  "output": "/Users/giulialvaro/Library/CloudStorage/OneDrive-Personal/estudios/Austral/Materias/018-Laboratorio de Implementación III/labo3-2026ba/datasets/cp_clusters_v2_fit201710.csv",
+  "fit_until": 201710,
+  "window": 4,
+  "active_clusters": 4,
+  "total_final_clusters": 7,
+  "sample_series": 800,
+  "seed": 1,
+  "active_definition": "positive_months >= 6",
+  "medoid_source_rows": [
+    134067,
+    110598,
+    18607,
+    164963
+  ],
+  "medoids_file": "",
+  "assignment_metric": "DTW",
+  "seconds": 6.4
+}

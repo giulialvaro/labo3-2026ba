@@ -1,0 +1,26 @@
+{
+  "winner": "lags_raw",
+  "target_scale": "raw",
+  "features": [
+    "lag_0",
+    "lag_1",
+    "lag_2",
+    "lag_3",
+    "lag_4",
+    "lag_5",
+    "lag_6",
+    "lag_7",
+    "lag_8",
+    "lag_9",
+    "lag_10",
+    "lag_11",
+    "lag_12"
+  ],
+  "anchors": [
+    201812,
+    201910
+  ],
+  "selection_rule": "0.7*WAPE_feb + 0.3*WAPE_dec",
+  "submission": "exp/lgbm_clean/lags_raw.csv",
+  "tn_total": 27227.624060785365
+}

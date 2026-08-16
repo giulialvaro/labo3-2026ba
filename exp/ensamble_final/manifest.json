@@ -1,0 +1,23 @@
+{
+  "baseline": "src/Estadistica/linreg.csv",
+  "candidate": "exp/lgbm_clean/lags_raw.csv",
+  "correlation": 0.9852181250416717,
+  "absolute_disagreement_over_baseline_total": 0.1359605817909649,
+  "outputs": [
+    {
+      "lgbm_weight": 0.1,
+      "file": "exp/ensamble_final/blend_linreg90_lgbm10.csv",
+      "tn_total": 28554.735402606195
+    },
+    {
+      "lgbm_weight": 0.2,
+      "file": "exp/ensamble_final/blend_linreg80_lgbm20.csv",
+      "tn_total": 28407.27858684833
+    },
+    {
+      "lgbm_weight": 0.3,
+      "file": "exp/ensamble_final/blend_linreg70_lgbm30.csv",
+      "tn_total": 28259.821771090457
+    }
+  ]
+}

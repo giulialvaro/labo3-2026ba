@@ -5,9 +5,21 @@ Cada grupo es barato de extender: se agregan expresiones polars sobre '.over(cla
 NOTA leakage: los rolling son TRAILING (incluyen el mes actual t, que SI se conoce
 al predecir t+2). El target es t+2, las features usan datos <= t. Sin fuga.
 """
+import os
+
 import polars as pl
 
-DATA = 'datasets'
+
+def _find_data():
+    """Encuentra datasets tanto en el repo local como en la VM de GCP."""
+    repo_data = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'datasets'))
+    for path in [os.environ.get('DATA_DIR'), repo_data, 'datasets', os.path.expanduser('~/buckets/b1/datasets')]:
+        if path and os.path.isdir(path):
+            return path
+    return repo_data
+
+
+DATA = _find_data()
 
 
 def cargar(clave):
@@ -110,6 +122,46 @@ def build_features(v, cfg):
         ])
         feats += ['cat1', 'cat2', 'cat3_cat', 'brand', 'sku_size']
         cat_feats += ['cat1', 'cat2', 'cat3_cat', 'brand']
+
+    # --- H. STOCKS (conocidos hasta el mes ancla t; target = t+2) ---
+    if cfg.get('stocks'):
+        stocks = (pl.read_csv(f'{DATA}/tb_stocks.txt', separator='\t')
+                    .select('product_id', 'periodo', 'stock_final')
+                    .unique(subset=['product_id', 'periodo']))
+        df = df.join(stocks, on=['product_id', 'periodo'], how='left').sort(*k, 'ds')
+
+        # tb_stocks comienza en 201810. La ausencia previa es falta de fuente,
+        # no stock cero: conservamos ese dato en stock_disponible.
+        df = df.with_columns([
+            pl.col('stock_final').is_not_null().cast(pl.Int8).alias('stock_disponible'),
+            (pl.col('stock_final') < 0).fill_null(False).cast(pl.Int8).alias('stock_negativo'),
+            pl.col('stock_final').fill_null(0.0).alias('stock_0'),
+        ])
+        df = df.with_columns([
+            pl.col('stock_0').shift(L).over(k).alias(f'stock_lag_{L}')
+            for L in [1, 2, 3, 6, 12]
+        ])
+        df = df.with_columns([
+            (pl.col('stock_0') - pl.col('stock_lag_1')).alias('stock_delta_1'),
+            (pl.col('stock_0') - pl.col('stock_lag_12')).alias('stock_delta_12'),
+            (pl.col('stock_0') / (pl.col('tn').abs() + 1e-3)).alias('stock_vs_tn'),
+        ])
+        stock_feats = [
+            'stock_disponible', 'stock_negativo', 'stock_0',
+            'stock_lag_1', 'stock_lag_2', 'stock_lag_3', 'stock_lag_6', 'stock_lag_12',
+            'stock_delta_1', 'stock_delta_12', 'stock_vs_tn',
+        ]
+        if 'rmean_3' in df.columns:
+            df = df.with_columns(
+                (pl.col('stock_0') / (pl.col('rmean_3').abs() + 1e-3)).alias('stock_cobertura_3')
+            )
+            stock_feats.append('stock_cobertura_3')
+        if 'rmean_12' in df.columns:
+            df = df.with_columns(
+                (pl.col('stock_0') / (pl.col('rmean_12').abs() + 1e-3)).alias('stock_cobertura_12')
+            )
+            stock_feats.append('stock_cobertura_12')
+        feats += stock_feats
 
     # target
     df = df.with_columns(pl.col('tn').shift(-cfg['target_lag']).over(k).alias('target'))

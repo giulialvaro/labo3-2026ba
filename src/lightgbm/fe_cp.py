@@ -30,6 +30,9 @@ DEF_CFG = {
     'target_lag': 2,
     'cosmos': True,            # D: agregaciones producto/cliente/cat + shares + momentum
     'precio': True,            # F: precios cuidados + fill rate
+    'buy_history': True,       # C: historia binaria de compra / intermitencia
+    'stocks': True,            # stock conocido a nivel producto en el mes ancla
+    'cluster_version': 'v2',   # v2 | legacy | None
 }
 
 
@@ -41,7 +44,8 @@ def cargar(sample_productos=None, seed=1):
                  pl.col('plan_precios_cuidados').max(),
                  pl.col('cust_request_tn').sum()))
     if sample_productos is not None:
-        prods = df.select('product_id').unique().sample(sample_productos, seed=seed).get_column('product_id').to_list()
+        prods = (df.select('product_id').unique().sort('product_id')
+                   .sample(sample_productos, seed=seed).get_column('product_id').to_list())
         df = df.filter(pl.col('product_id').is_in(prods))
     return df.sort(*CLAVE, 'periodo')
 
@@ -49,6 +53,7 @@ def cargar(sample_productos=None, seed=1):
 def build_features(df, cfg=None):
     cfg = {**DEF_CFG, **(cfg or {})}
     k = CLAVE
+    eps = cfg['eps']
     feats = []
 
     # ---------- A. ESCALADO (tecnica Rosario) ----------
@@ -61,10 +66,14 @@ def build_features(df, cfg=None):
         (pl.col('tn') / pl.col('promedio_nivel')).alias('tn_esc')
     )
     feats.append('promedio_nivel')   # el nivel tambien es feature
-    # target escalado: tn(t+2) / promedio_nivel   (al predecir, des-escalar x promedio_nivel)
+    # Targets para hurdle: compra y cantidad escalada. Al predecir se des-escala.
     df = df.with_columns(
-        (pl.col('tn').shift(-cfg['target_lag']).over(k) / pl.col('promedio_nivel')).alias('target')
-    )
+        pl.col('tn').shift(-cfg['target_lag']).over(k).alias('target_tn')
+    ).with_columns([
+        (pl.col('target_tn') / pl.col('promedio_nivel')).alias('target'),
+        pl.when(pl.col('target_tn').is_null()).then(None)
+          .otherwise((pl.col('target_tn') > 0).cast(pl.Int8)).alias('target_buy'),
+    ])
 
     # ---------- B. HISTORIA (sobre la serie ESCALADA tn_esc) ----------
     df = df.with_columns([pl.col('tn_esc').shift(L).over(k).alias(f'lag_{L}') for L in cfg['lags']])
@@ -87,12 +96,32 @@ def build_features(df, cfg=None):
         (pl.col('lag_1') - pl.col('lag_2')).alias('dlag_1_2'),
         (pl.col('lag_1') - pl.col('lag_3')).alias('dlag_1_3'),
         ((pl.col('lag_0') - pl.col('lag_5')) / 5).alias('slope_5'),
+        (pl.col('lag_0') / (pl.col('lag_1') + eps)).alias('ratio_1'),
+        (pl.col('lag_0') / (pl.col('lag_12') + eps)).alias('ratio_12'),
         pl.col('tn_esc').ewm_mean(span=3).over(k).alias('ewm_3'),
         pl.col('tn_esc').ewm_mean(span=6).over(k).alias('ewm_6'),
     ])
-    feats += ['delta_1', 'delta_12', 'dlag_1_2', 'dlag_1_3', 'slope_5', 'ewm_3', 'ewm_6']
+    feats += ['delta_1', 'delta_12', 'dlag_1_2', 'dlag_1_3', 'slope_5',
+              'ratio_1', 'ratio_12', 'ewm_3', 'ewm_6']
 
-    eps = cfg['eps']
+    # ---------- C. COMPRA / INTERMITENCIA ----------
+    if cfg.get('buy_history'):
+        df = df.with_columns([
+            (pl.col('tn') > 0).cast(pl.Int8).alias('_buy'),
+            pl.int_range(pl.len()).over(k).alias('_idx'),
+        ])
+        df = df.with_columns([
+            pl.col('_buy').shift(L).over(k).alias(f'buy_lag_{L}') for L in [0, 1, 2, 3, 6, 12]
+        ] + [
+            pl.col('_buy').rolling_sum(w, min_samples=1).over(k).alias(f'buys_{w}') for w in [3, 6, 12]
+        ])
+        df = df.with_columns(
+            (pl.col('_idx') - pl.when(pl.col('_buy') == 1).then(pl.col('_idx')).otherwise(None)
+             .forward_fill().over(k)).alias('months_since_buy')
+        )
+        feats += [f'buy_lag_{L}' for L in [0, 1, 2, 3, 6, 12]]
+        feats += [f'buys_{w}' for w in [3, 6, 12]] + ['months_since_buy']
+
     # ---------- D. COSMOS / AGREGACIONES (producto, cliente, categoria) ----------
     if cfg.get('cosmos'):
         prod = (pl.read_csv(f'{DATA}/tb_productos.txt', separator='\t')
@@ -129,17 +158,47 @@ def build_features(df, cfg=None):
         df = df.with_columns([pl.col('fill_rate').shift(L).over(k).alias(f'fill_rate_lag{L}') for L in [1, 2, 3]])
         feats += ['ppc', 'fill_rate', 'fill_rate_lag1', 'fill_rate_lag2', 'fill_rate_lag3']
 
-    # ---------- cluster DTW (si existe el archivo product_clusters.csv) ----------
-    cp_path = f'{DATA}/cp_clusters.csv'          # cluster a nivel CLIENTE-PRODUCTO (preferido)
-    prod_path = f'{DATA}/product_clusters.csv'   # fallback: cluster a nivel producto
-    if os.path.exists(cp_path):
-        cl = pl.read_csv(cp_path).with_columns([pl.col('customer_id').cast(pl.Int64), pl.col('product_id').cast(pl.Int64)])
-        df = df.join(cl, on=['customer_id', 'product_id'], how='left')
-        feats.append('cluster')
-    elif os.path.exists(prod_path):
-        cl = pl.read_csv(prod_path).with_columns(pl.col('product_id').cast(pl.Int64))
-        df = df.join(cl, on='product_id', how='left')
-        feats.append('cluster')
+    # ---------- STOCK (producto x mes; disponible en t, target t+2) ----------
+    if cfg.get('stocks'):
+        stock = (pl.read_csv(f'{DATA}/tb_stocks.txt', separator='\t')
+                   .select('product_id', 'periodo', 'stock_final')
+                   .unique(subset=['product_id', 'periodo']))
+        df = df.join(stock, on=['product_id', 'periodo'], how='left').sort(*k, 'periodo')
+        df = df.with_columns([
+            pl.col('stock_final').is_not_null().cast(pl.Int8).alias('stock_available'),
+            pl.col('stock_final').fill_null(0.0).alias('stock_0'),
+            (pl.col('stock_final') < 0).fill_null(False).cast(pl.Int8).alias('stock_negative'),
+        ])
+        df = df.with_columns([
+            pl.col('stock_0').shift(L).over(k).alias(f'stock_lag_{L}') for L in [1, 2, 3, 6, 12]
+        ])
+        stock_exprs = [
+            (pl.col('stock_0') - pl.col('stock_lag_1')).alias('stock_delta_1'),
+            (pl.col('stock_0') - pl.col('stock_lag_12')).alias('stock_delta_12'),
+        ]
+        if 'tot_prod' in df.columns:
+            stock_exprs.append((pl.col('stock_0') / (pl.col('tot_prod') + eps)).alias('stock_vs_prod'))
+        df = df.with_columns(stock_exprs)
+        feats += ['stock_available', 'stock_0', 'stock_negative']
+        feats += [f'stock_lag_{L}' for L in [1, 2, 3, 6, 12]]
+        feats += [x.meta.output_name() for x in stock_exprs]
+
+    # ---------- DTW: v2 no reutiliza accidentalmente el clustering viejo ----------
+    cluster_version = cfg.get('cluster_version')
+    if cluster_version == 'v2':
+        cp_path = f'{DATA}/cp_clusters_v2.csv'
+        if os.path.exists(cp_path):
+            cl = (pl.read_csv(cp_path)
+                    .with_columns(pl.col('customer_id', 'product_id').cast(pl.Int64))
+                    .select('customer_id', 'product_id', 'regime', 'shape_cluster', 'cluster_v2'))
+            df = df.join(cl, on=['customer_id', 'product_id'], how='left')
+            feats += ['regime', 'shape_cluster', 'cluster_v2']
+    elif cluster_version == 'legacy':
+        cp_path = f'{DATA}/cp_clusters.csv'
+        if os.path.exists(cp_path):
+            cl = pl.read_csv(cp_path).with_columns(pl.col('customer_id', 'product_id').cast(pl.Int64))
+            df = df.join(cl, on=['customer_id', 'product_id'], how='left')
+            feats.append('cluster')
 
     return df, feats
 
